@@ -196,7 +196,8 @@ export class NewApiMonitorService {
     };
   }
 
-  private async getChannelUsageSummary(channelId: number): Promise<ChannelUsageSummary> {
+  private async getChannelUsageSummary(channelId: number, hours: HoursRange): Promise<ChannelUsageSummary> {
+    const timeFilter = this.buildTimeFilter(hours, 2);
     const logsBaseFilter = this.getLogsBaseFilterSql();
     const rows = await this.database.query<{
       total_count: string;
@@ -226,9 +227,10 @@ export class NewApiMonitorService {
           MAX(created_at) AS last_used_at
         FROM logs
         WHERE channel_id = $1
+          ${timeFilter.sql}
           ${logsBaseFilter}
       `,
-      [channelId],
+      [channelId, ...timeFilter.params],
     );
 
     const row = rows[0];
@@ -290,6 +292,7 @@ export class NewApiMonitorService {
   }
 
   private async getChannelTopModels(channelId: number, hours: HoursRange = 'all'): Promise<ModelInfo[]> {
+    const timeFilter = this.buildTimeFilter(hours, 2);
     const logsBaseFilter = this.getLogsBaseFilterSql();
     const bucket = this.buildBucketSql(hours);
     const bucketFl = this.buildBucketSql(hours, 'fl');
@@ -316,6 +319,7 @@ export class NewApiMonitorService {
           SELECT *
           FROM logs
           WHERE channel_id = $1
+            ${timeFilter.sql}
             ${logsBaseFilter}
         ),
         hourly_counts AS (
@@ -360,7 +364,7 @@ export class NewApiMonitorService {
         ORDER BY total_count DESC, fl.model_name ASC
         LIMIT 8
       `,
-      [channelId],
+      [channelId, ...timeFilter.params],
     );
 
     return rows.map((row) => {
@@ -400,9 +404,9 @@ export class NewApiMonitorService {
     }
 
     const [usageSummary, hourlyStats, topModels] = await Promise.all([
-      this.getChannelUsageSummary(channelId),
+      this.getChannelUsageSummary(channelId, hours),
       this.getChannelHourlyStats(channelId, hours),
-      this.getChannelTopModels(channelId),
+      this.getChannelTopModels(channelId, hours),
     ]);
 
     return {
