@@ -83,7 +83,7 @@ export async function verifyGeetestCaptcha(payload: GeetestValidationPayload): P
   }
 }
 
-export function buildSearchTarget(scope: 'key' | 'channel', value: string): string {
+export function buildSearchTarget(scope: 'key' | 'channel' | 'user', value: string): string {
   return `${scope}:${value.trim()}`;
 }
 

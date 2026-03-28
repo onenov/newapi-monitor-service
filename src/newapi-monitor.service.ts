@@ -21,6 +21,7 @@ import type {
   ModelSummary,
   QueryLogsParams,
   QueryLogsResponseData,
+  TimeOpts,
   UserHourlyStat,
   UserUsageSummary,
 } from './types.js';
@@ -53,7 +54,16 @@ export class NewApiMonitorService {
     `;
   }
 
-  private buildTimeFilter(hours: HoursRange, startIndex: number): { sql: string; params: number[] } {
+  // customStart/customEnd override hours when provided
+  private buildTimeFilter(hours: HoursRange, startIndex: number, customStart?: number, customEnd?: number): { sql: string; params: number[] } {
+    if (customStart && customEnd) {
+      return {
+        sql: `AND created_at >= $${startIndex}
+            AND created_at <= $${startIndex + 1}`,
+        params: [customStart, customEnd],
+      };
+    }
+
     const endTimestamp = Math.floor(Date.now() / 1000);
 
     if (hours === 'all') {
@@ -1174,8 +1184,8 @@ export class NewApiMonitorService {
     };
   }
 
-  private async getUserHourlyStats(userId: number, hours: HoursRange): Promise<UserHourlyStat[]> {
-    const timeFilter = this.buildTimeFilter(hours, 2);
+  private async getUserHourlyStats(userId: number, hours: HoursRange, timeOpts?: TimeOpts): Promise<UserHourlyStat[]> {
+    const timeFilter = this.buildTimeFilter(hours, 2, timeOpts?.start, timeOpts?.end);
     const bucket = this.buildBucketSql(hours);
     const rows = await this.database.query<{
       hour: string;
@@ -1257,6 +1267,158 @@ export class NewApiMonitorService {
       user_hourly_stats: userHourlyStats,
       top_models: topModels,
     };
+  }
+
+  // Search by username
+  async getUserQuota(username: string, hours: HoursRange = 24, timeOpts?: TimeOpts): Promise<KeyQuotaResponseData | null> {
+    // Find user by username
+    const userRows = await this.database.query<{ id: string }>(
+      `SELECT id FROM users WHERE username = $1 LIMIT 1`,
+      [username],
+    );
+    if (!userRows[0]) return null;
+    const userId = Number(userRows[0].id);
+
+    const [user, userUsageSummary, userHourlyStats, topModels] = await Promise.all([
+      this.getUserInfo(userId),
+      this.getUserUsageSummary(userId),
+      this.getUserHourlyStats(userId, hours, timeOpts),
+      this.getUserTopModels(userId, hours, timeOpts),
+    ]);
+
+    if (!user) return null;
+
+    return {
+      hours,
+      token: {
+        tokenId: 0,
+        maskedKey: '',
+        name: `${username} (all keys)`,
+        status: 1,
+        group: user.group,
+        createdTime: 0,
+        accessedTime: 0,
+        expiredTime: 0,
+        remainQuota: user.remainQuota,
+        usedQuota: user.usedQuota,
+        unlimitedQuota: false,
+        modelLimitsEnabled: false,
+        modelLimits: [] as string[],
+        allowIps: [] as string[],
+        crossGroupRetry: false,
+      },
+      user,
+      usage_summary: userUsageSummary,
+      hourly_stats: userHourlyStats,
+      user_usage_summary: userUsageSummary,
+      user_hourly_stats: userHourlyStats,
+      top_models: topModels,
+    };
+  }
+
+  private async getUserTopModels(userId: number, hours: HoursRange = 'all', timeOpts?: TimeOpts): Promise<ModelInfo[]> {
+    const bucket = this.buildBucketSql(hours);
+    const bucketFl = this.buildBucketSql(hours, 'fl');
+    const timeFilter = this.buildTimeFilter(hours, 2, timeOpts?.start, timeOpts?.end);
+    const rows = await this.database.query<{
+      model_name: string;
+      total_count: string;
+      success_count: string;
+      failed_count: string;
+      avg_time: string | null;
+      first_used_at: string | null;
+      last_used_at: string | null;
+      total_quota: string | null;
+      total_prompt_tokens: string | null;
+      total_completion_tokens: string | null;
+      total_tokens: string | null;
+      unique_users: string;
+      active_hours: string;
+      peak_hour: string | null;
+      peak_count: string | null;
+      stream_count: string;
+    }>(
+      `
+        WITH filtered_logs AS (
+          SELECT *
+          FROM logs
+          WHERE user_id = $1
+            AND COALESCE(model_name, '') <> ''
+            ${timeFilter.sql}
+        ),
+        hourly_counts AS (
+          SELECT
+            model_name,
+            ${bucket} AS hour_bucket,
+            COUNT(*) AS hour_count
+          FROM filtered_logs
+          GROUP BY model_name, hour_bucket
+        ),
+        peak_hours AS (
+          SELECT
+            model_name,
+            hour_bucket,
+            hour_count,
+            ROW_NUMBER() OVER (
+              PARTITION BY model_name
+              ORDER BY hour_count DESC, hour_bucket DESC
+            ) AS row_num
+          FROM hourly_counts
+        )
+        SELECT
+          fl.model_name,
+          COUNT(*) AS total_count,
+          COUNT(*) FILTER (WHERE fl.type = 2) AS success_count,
+          COUNT(*) FILTER (WHERE fl.type = 5) AS failed_count,
+          ROUND(AVG(CASE WHEN fl.type = 2 THEN fl.use_time END)::numeric, 2) AS avg_time,
+          MIN(fl.created_at) AS first_used_at,
+          MAX(fl.created_at) AS last_used_at,
+          SUM(fl.quota) AS total_quota,
+          SUM(fl.prompt_tokens) AS total_prompt_tokens,
+          SUM(fl.completion_tokens) AS total_completion_tokens,
+          SUM(fl.prompt_tokens + fl.completion_tokens) AS total_tokens,
+          COUNT(DISTINCT fl.user_id) AS unique_users,
+          COUNT(DISTINCT ${bucketFl}) AS active_hours,
+          MAX(CASE WHEN ph.row_num = 1 THEN ph.hour_bucket END) AS peak_hour,
+          MAX(CASE WHEN ph.row_num = 1 THEN ph.hour_count END) AS peak_count,
+          COUNT(*) FILTER (WHERE fl.is_stream = true) AS stream_count
+        FROM filtered_logs fl
+        LEFT JOIN peak_hours ph ON ph.model_name = fl.model_name AND ph.row_num = 1
+        GROUP BY fl.model_name
+        ORDER BY total_count DESC, fl.model_name ASC
+        LIMIT 8
+      `,
+      [userId, ...timeFilter.params],
+    );
+
+    return rows.map((row) => {
+      const count = Number(row.total_count);
+      const successCount = Number(row.success_count);
+      const totalQuota = Number(row.total_quota ?? 0);
+      const totalTokens = Number(row.total_tokens ?? 0);
+      return {
+        name: row.model_name,
+        count,
+        successCount,
+        failedCount: Number(row.failed_count),
+        successRate: count > 0 ? Number(((successCount / count) * 100).toFixed(2)) : 0,
+        avgTime: Number(row.avg_time ?? 0),
+        firstUsedAt: row.first_used_at ? Number(row.first_used_at) : null,
+        lastUsedAt: row.last_used_at ? Number(row.last_used_at) : null,
+        totalQuota,
+        totalPromptTokens: Number(row.total_prompt_tokens ?? 0),
+        totalCompletionTokens: Number(row.total_completion_tokens ?? 0),
+        totalTokens,
+        avgTotalTokens: count > 0 ? Number((totalTokens / count).toFixed(2)) : 0,
+        avgQuotaPerRequest: count > 0 ? Number((totalQuota / count).toFixed(2)) : 0,
+        uniqueUsers: Number(row.unique_users ?? 0),
+        activeHours: Number(row.active_hours ?? 0),
+        peakHour: row.peak_hour ? Number(row.peak_hour) : null,
+        peakCount: Number(row.peak_count ?? 0),
+        streamRate: count > 0 ? Number(((Number(row.stream_count ?? 0) / count) * 100).toFixed(2)) : 0,
+        countChange: null,
+      };
+    });
   }
 
   async queryLogs(params: QueryLogsParams): Promise<QueryLogsResponseData> {

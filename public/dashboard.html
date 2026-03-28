@@ -245,7 +245,7 @@
             <div class="relative w-full">
               <i data-lucide="key"
                 class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"></i>
-              <input id="keySearchInput" type="text" placeholder="输入 API Key 查询额度"
+              <input id="keySearchInput" type="text" placeholder="sk-Key / 渠道ID / 用户名"
                 class="w-full rounded-full border border-primary-300/90 bg-white/90 py-2 pl-9 pr-9 text-sm font-medium outline-none transition focus:border-primary-400 focus:ring-2 focus:ring-primary-200 dark:border-primary-700/80 dark:bg-slate-900/90 dark:text-slate-200 dark:focus:border-primary-500 dark:focus:ring-primary-900/40">
               <button id="keyClearButton" type="button"
                 class="absolute right-2.5 top-1/2 -translate-y-1/2 hidden text-slate-400 transition hover:text-slate-600 dark:hover:text-slate-200"
@@ -260,6 +260,12 @@
             </button>
           </div>
           <div id="hoursButtonGroup" class="flex items-center gap-1.5 overflow-x-auto"></div>
+          <div id="customTimeRange" class="hidden flex items-center gap-2 mt-2 flex-wrap">
+            <input type="datetime-local" id="customStartTime" class="rounded-lg border border-slate-200/80 bg-white/80 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-300" />
+            <span class="text-xs text-slate-500">—</span>
+            <input type="datetime-local" id="customEndTime" class="rounded-lg border border-slate-200/80 bg-white/80 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-300" />
+            <button type="button" id="customTimeApply" class="shrink-0 rounded-lg bg-primary-500 px-2.5 py-1.5 text-xs font-bold text-white transition hover:bg-primary-600 dark:bg-primary-500 dark:text-slate-950 dark:hover:bg-primary-400">确认</button>
+          </div>
         </div>
       </section>
 
@@ -486,6 +492,8 @@
       loading: false,
       data: null,
       hours: '24',
+      customStart: null,
+      customEnd: null,
       detailData: null,
       detailMode: null,
       detailExpandedModelName: null,
@@ -525,6 +533,10 @@
       detailModelsEyebrow: document.getElementById('detailModelsEyebrow'),
       detailModelsTitle: document.getElementById('detailModelsTitle'),
       hoursButtonGroup: document.getElementById('hoursButtonGroup'),
+      customTimeRange: document.getElementById('customTimeRange'),
+      customStartTime: document.getElementById('customStartTime'),
+      customEndTime: document.getElementById('customEndTime'),
+      customTimeApply: document.getElementById('customTimeApply'),
       refreshButton: document.getElementById('refreshButton'),
       overviewCards: document.getElementById('overviewCards'),
       trendChart: document.getElementById('trendChart'),
@@ -750,33 +762,51 @@
       }
 
       return {
-        mode: 'key',
+        mode: 'user',
         value,
       };
     }
 
     function setDetailSectionCopy(mode) {
       const isChannel = mode === 'channel';
-      elements.detailTrendEyebrow.textContent = isChannel ? 'Channel Trend' : 'Key Trend';
-      elements.detailTrendTitle.textContent = isChannel ? '渠道使用趋势' : 'Key 使用趋势';
-      elements.detailModelsEyebrow.textContent = isChannel ? 'Channel Models' : 'Key Models';
-      elements.detailModelsTitle.textContent = isChannel ? '渠道模型排行' : 'Key 模型排行';
+      const isUser = mode === 'user';
+      const label = isChannel ? '渠道' : isUser ? '用户' : 'Key';
+      const labelEn = isChannel ? 'Channel' : isUser ? 'User' : 'Key';
+      elements.detailTrendEyebrow.textContent = `${labelEn} Trend`;
+      elements.detailTrendTitle.textContent = `${label}使用趋势`;
+      elements.detailModelsEyebrow.textContent = `${labelEn} Models`;
+      elements.detailModelsTitle.textContent = `${label}模型排行`;
     }
 
     function renderHoursButtons() {
       const activeClass = 'shrink-0 rounded-lg bg-primary-500 px-2.5 py-1.5 text-xs font-bold text-white transition hover:bg-primary-600 dark:bg-primary-500 dark:text-slate-950 dark:hover:bg-primary-400';
       const inactiveClass = 'shrink-0 rounded-lg border border-slate-200/80 bg-white/80 px-2.5 py-1.5 text-xs font-bold text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white';
 
+      const isCustom = state.hours === 'custom';
       elements.hoursButtonGroup.innerHTML = HOURS_PRESETS.map((preset) => {
-        const isActive = state.hours === preset.value;
+        const isActive = !isCustom && state.hours === preset.value;
         return `<button type="button" class="${isActive ? activeClass : inactiveClass}" data-hours-btn="${preset.value}">${preset.label}</button>`;
-      }).join('');
+      }).join('') + `<button type="button" class="${isCustom ? activeClass : inactiveClass}" data-hours-btn="custom">自定义</button>`;
+
+      elements.customTimeRange.classList.toggle('hidden', !isCustom);
 
       elements.hoursButtonGroup.querySelectorAll('[data-hours-btn]').forEach((button) => {
         button.addEventListener('click', () => {
           const value = button.getAttribute('data-hours-btn') || '24';
+          if (value === 'custom') {
+            state.hours = 'custom';
+            renderHoursButtons();
+            // Set default range: last 24h
+            const now = new Date();
+            const yesterday = new Date(now.getTime() - 24 * 3600 * 1000);
+            elements.customStartTime.value = yesterday.toISOString().slice(0, 16);
+            elements.customEndTime.value = now.toISOString().slice(0, 16);
+            return;
+          }
           if (state.hours === value) return;
           state.hours = value;
+          state.customStart = null;
+          state.customEnd = null;
           state.expandedModelName = null;
           renderHoursButtons();
           hideError();
@@ -787,6 +817,30 @@
           }
         });
       });
+
+      // Custom time apply button
+      elements.customTimeApply.onclick = () => {
+        const startVal = elements.customStartTime.value;
+        const endVal = elements.customEndTime.value;
+        if (!startVal || !endVal) return;
+        const startTs = Math.floor(new Date(startVal).getTime() / 1000);
+        const endTs = Math.floor(new Date(endVal).getTime() / 1000);
+        if (endTs <= startTs) return;
+        // Store exact timestamps for API calls that support it
+        state.customStart = startTs;
+        state.customEnd = endTs;
+        // Convert to hours from start to now for APIs that only support hours
+        const nowTs = Math.floor(Date.now() / 1000);
+        const hoursFromNow = Math.ceil((nowTs - startTs) / 3600);
+        state.hours = String(hoursFromNow);
+        state.expandedModelName = null;
+        hideError();
+        if (state.detailData && elements.keySearchInput.value.trim()) {
+          void loadDetailBySearch(elements.keySearchInput.value);
+        } else {
+          void loadDashboard();
+        }
+      };
     }
 
     function renderTrendModelOptions(models) {
@@ -1592,9 +1646,10 @@
 
     function renderKeyInfo(data) {
       state.detailData = data;
-      state.detailMode = 'key';
+      const isUserMode = data.token && data.token.tokenId === 0;
+      state.detailMode = isUserMode ? 'user' : 'key';
       state.detailExpandedModelName = null;
-      setDetailSectionCopy('key');
+      setDetailSectionCopy(isUserMode ? 'user' : 'key');
       const token = data.token;
       const user = data.user;
       const usage = data.usage_summary;
@@ -2044,6 +2099,44 @@
       }
     }
 
+    // Search by username
+    async function loadUserQuota(username, verificationData = null) {
+      if (!username || !username.trim()) {
+        clearDetailInfo();
+        return;
+      }
+
+      setLoading(true);
+      try {
+        const response = await fetch(buildApiUrl('/api/user/quota', {
+          username: username.trim(),
+          hours: state.hours,
+          ...(state.customStart && state.customEnd ? { start: state.customStart, end: state.customEnd } : {}),
+          ...(verificationData ? verificationData : {}),
+        }, {
+          searchTarget: buildSearchTarget('user', username.trim()),
+        }), {
+          headers: { ...getAuthHeaders() },
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (isSearchVerificationError(payload, response)) {
+          clearSearchAccess({ revoke: true });
+        }
+        if (!response.ok) {
+          throw new Error(payload.message || `用户查询失败 (${response.status})`);
+        }
+
+        rememberSearchAccessToken(payload, buildSearchTarget('user', username.trim()));
+        renderKeyInfo(payload.data);
+      } catch (error) {
+        showError(error instanceof Error ? error.message : '用户查询失败');
+        clearDetailInfo();
+      } finally {
+        setLoading(false);
+        lucide.createIcons();
+      }
+    }
+
     async function loadDetailBySearch(rawValue, verificationData = null) {
       const parsed = parseDetailSearchQuery(rawValue);
       if (!parsed) {
@@ -2053,6 +2146,11 @@
 
       if (parsed.mode === 'channel') {
         await loadChannelRecords(parsed.value, verificationData);
+        return;
+      }
+
+      if (parsed.mode === 'user') {
+        await loadUserQuota(parsed.value, verificationData);
         return;
       }
 

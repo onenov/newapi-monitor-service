@@ -80,6 +80,12 @@ function getSearchTargetFromRequest(request: express.Request): string | null {
     return channelId ? buildSearchTarget('channel', channelId) : null;
   }
 
+  // User search support
+  if (request.path.endsWith('/user/quota')) {
+    const username = typeof request.query.username === 'string' ? request.query.username.trim() : '';
+    return username ? buildSearchTarget('user', username) : null;
+  }
+
   return null;
 }
 
@@ -200,6 +206,12 @@ async function bootstrap(): Promise<void> {
         return;
       }
 
+      if (!isSearchVerificationEnabled() && !config.monitorApiToken) {
+        // No auth configured, allow all searches
+        next();
+        return;
+      }
+
       if (!isSearchVerificationEnabled()) {
         response.status(403).json({
           code: 'SEARCH_VERIFICATION_REQUIRED',
@@ -272,6 +284,35 @@ async function bootstrap(): Promise<void> {
         return;
       }
 
+      response.json({
+        data: result,
+        ...(response.locals.searchAccessToken ? {
+          search_token: response.locals.searchAccessToken,
+          search_target: response.locals.searchTarget,
+        } : {}),
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // User search by username
+  app.get(`${apiPath}/user/quota`, requireSearchVerification, async (request, response, next) => {
+    try {
+      const username = String(request.query.username || '').trim();
+      const hours = request.query.hours ? hoursRangeSchema.parse(request.query.hours) : 24;
+      const start = request.query.start ? Number(request.query.start) : undefined;
+      const end = request.query.end ? Number(request.query.end) : undefined;
+      if (!username) {
+        response.status(400).json({ message: 'username is required' });
+        return;
+      }
+      const timeOpts = (start && end) ? { start, end } : undefined;
+      const result = await monitorService.getUserQuota(username, hours, timeOpts);
+      if (!result) {
+        response.status(404).json({ message: 'User not found' });
+        return;
+      }
       response.json({
         data: result,
         ...(response.locals.searchAccessToken ? {
