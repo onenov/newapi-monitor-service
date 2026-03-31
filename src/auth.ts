@@ -40,7 +40,7 @@ export function requireApiToken(request: Request, response: Response, next: Next
     return;
   }
 
-  if (request.path === '/key/quota' || request.path === '/channel/records') {
+  if (request.path === '/key/quota' || request.path === '/channel/records' || request.path === '/user/quota') {
     next();
     return;
   }

@@ -215,6 +215,12 @@ export interface ChannelRecordsResponseData {
 
 export type HoursRange = number | 'all';
 
+// Optional custom time range
+export interface TimeOpts {
+  start?: number;
+  end?: number;
+}
+
 export interface QueryLogsParams {
   modelName: string;
   hours: HoursRange;

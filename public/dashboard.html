@@ -7,14 +7,9 @@
   <title>Monitor Dashboard</title>
   <link id="favicon" rel="icon" href="" type="image/png">
   <meta name="description" content="NewAPI Monitor Dashboard">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link
-    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap"
-    rel="stylesheet">
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
-  <script src="https://static.geetest.com/v4/gt4.js"></script>
+  <link rel="stylesheet" href="./static/fonts/fonts.css">
+  <script src="./static/tailwind.min.js"></script>
+  <script src="./static/echarts.min.js"></script>
   <script>
     tailwind.config = {
       darkMode: 'class',
@@ -245,7 +240,7 @@
             <div class="relative w-full">
               <i data-lucide="key"
                 class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"></i>
-              <input id="keySearchInput" type="text" placeholder="输入 API Key 查询额度"
+              <input id="keySearchInput" type="text" placeholder="sk-Key / 渠道ID / 用户名"
                 class="w-full rounded-full border border-primary-300/90 bg-white/90 py-2 pl-9 pr-9 text-sm font-medium outline-none transition focus:border-primary-400 focus:ring-2 focus:ring-primary-200 dark:border-primary-700/80 dark:bg-slate-900/90 dark:text-slate-200 dark:focus:border-primary-500 dark:focus:ring-primary-900/40">
               <button id="keyClearButton" type="button"
                 class="absolute right-2.5 top-1/2 -translate-y-1/2 hidden text-slate-400 transition hover:text-slate-600 dark:hover:text-slate-200"
@@ -260,6 +255,12 @@
             </button>
           </div>
           <div id="hoursButtonGroup" class="flex items-center gap-1.5 overflow-x-auto"></div>
+          <div id="customTimeRange" class="hidden flex items-center gap-2 mt-2 flex-wrap">
+            <input type="datetime-local" id="customStartTime" class="rounded-lg border border-slate-200/80 bg-white/80 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-300" />
+            <span class="text-xs text-slate-500">—</span>
+            <input type="datetime-local" id="customEndTime" class="rounded-lg border border-slate-200/80 bg-white/80 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-300" />
+            <button type="button" id="customTimeApply" class="shrink-0 rounded-lg bg-primary-500 px-2.5 py-1.5 text-xs font-bold text-white transition hover:bg-primary-600 dark:bg-primary-500 dark:text-slate-950 dark:hover:bg-primary-400">确认</button>
+          </div>
         </div>
       </section>
 
@@ -291,7 +292,7 @@
           <div class="overflow-x-auto">
             <table class="min-w-full border-separate border-spacing-y-3">
               <thead>
-                <tr class="text-left text-xs font-extrabold tracking-[0.12em] text-slate-500 dark:text-slate-400">
+                <tr id="keyModelsTableHead" class="text-left text-xs font-extrabold tracking-[0.12em] text-slate-500 dark:text-slate-400">
                   <th class="px-4 py-2">模型</th>
                   <th class="px-4 py-2">请求数</th>
                   <th class="px-4 py-2">成功率</th>
@@ -388,7 +389,7 @@
           <div id="topModelsTableView" class="overflow-x-auto">
             <table class="min-w-full border-separate border-spacing-y-3">
               <thead>
-                <tr class="text-left text-xs font-extrabold tracking-[0.12em] text-slate-500 dark:text-slate-400">
+                <tr id="topModelsTableHead" class="text-left text-xs font-extrabold tracking-[0.12em] text-slate-500 dark:text-slate-400">
                   <th class="px-4 py-2">模型</th>
                   <th class="px-4 py-2">请求数</th>
                   <th class="px-4 py-2">成功率</th>
@@ -486,10 +487,16 @@
       loading: false,
       data: null,
       hours: '24',
+      customStart: null,
+      customEnd: null,
       detailData: null,
       detailMode: null,
       detailExpandedModelName: null,
       topModelsView: 'table',
+      topModelsSortField: 'totalQuota',
+      topModelsSortOrder: 'desc',
+      detailModelsSortField: 'totalQuota',
+      detailModelsSortOrder: 'desc',
       expandedModelName: null,
       trendMode: 'all',
       trendModelName: '__all__',
@@ -523,8 +530,13 @@
       detailTrendEyebrow: document.getElementById('detailTrendEyebrow'),
       detailTrendTitle: document.getElementById('detailTrendTitle'),
       detailModelsEyebrow: document.getElementById('detailModelsEyebrow'),
+      keyModelsTableHead: document.getElementById('keyModelsTableHead'),
       detailModelsTitle: document.getElementById('detailModelsTitle'),
       hoursButtonGroup: document.getElementById('hoursButtonGroup'),
+      customTimeRange: document.getElementById('customTimeRange'),
+      customStartTime: document.getElementById('customStartTime'),
+      customEndTime: document.getElementById('customEndTime'),
+      customTimeApply: document.getElementById('customTimeApply'),
       refreshButton: document.getElementById('refreshButton'),
       overviewCards: document.getElementById('overviewCards'),
       trendChart: document.getElementById('trendChart'),
@@ -750,33 +762,51 @@
       }
 
       return {
-        mode: 'key',
+        mode: 'user',
         value,
       };
     }
 
     function setDetailSectionCopy(mode) {
       const isChannel = mode === 'channel';
-      elements.detailTrendEyebrow.textContent = isChannel ? 'Channel Trend' : 'Key Trend';
-      elements.detailTrendTitle.textContent = isChannel ? '渠道使用趋势' : 'Key 使用趋势';
-      elements.detailModelsEyebrow.textContent = isChannel ? 'Channel Models' : 'Key Models';
-      elements.detailModelsTitle.textContent = isChannel ? '渠道模型排行' : 'Key 模型排行';
+      const isUser = mode === 'user';
+      const label = isChannel ? '渠道' : isUser ? '用户' : 'Key';
+      const labelEn = isChannel ? 'Channel' : isUser ? 'User' : 'Key';
+      elements.detailTrendEyebrow.textContent = `${labelEn} Trend`;
+      elements.detailTrendTitle.textContent = `${label}使用趋势`;
+      elements.detailModelsEyebrow.textContent = `${labelEn} Models`;
+      elements.detailModelsTitle.textContent = `${label}模型排行`;
     }
 
     function renderHoursButtons() {
       const activeClass = 'shrink-0 rounded-lg bg-primary-500 px-2.5 py-1.5 text-xs font-bold text-white transition hover:bg-primary-600 dark:bg-primary-500 dark:text-slate-950 dark:hover:bg-primary-400';
       const inactiveClass = 'shrink-0 rounded-lg border border-slate-200/80 bg-white/80 px-2.5 py-1.5 text-xs font-bold text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white';
 
+      const isCustom = state.hours === 'custom';
       elements.hoursButtonGroup.innerHTML = HOURS_PRESETS.map((preset) => {
-        const isActive = state.hours === preset.value;
+        const isActive = !isCustom && state.hours === preset.value;
         return `<button type="button" class="${isActive ? activeClass : inactiveClass}" data-hours-btn="${preset.value}">${preset.label}</button>`;
-      }).join('');
+      }).join('') + `<button type="button" class="${isCustom ? activeClass : inactiveClass}" data-hours-btn="custom">自定义</button>`;
+
+      elements.customTimeRange.classList.toggle('hidden', !isCustom);
 
       elements.hoursButtonGroup.querySelectorAll('[data-hours-btn]').forEach((button) => {
         button.addEventListener('click', () => {
           const value = button.getAttribute('data-hours-btn') || '24';
+          if (value === 'custom') {
+            state.hours = 'custom';
+            renderHoursButtons();
+            // Set default range: last 24h
+            const now = new Date();
+            const yesterday = new Date(now.getTime() - 24 * 3600 * 1000);
+            elements.customStartTime.value = yesterday.toISOString().slice(0, 16);
+            elements.customEndTime.value = now.toISOString().slice(0, 16);
+            return;
+          }
           if (state.hours === value) return;
           state.hours = value;
+          state.customStart = null;
+          state.customEnd = null;
           state.expandedModelName = null;
           renderHoursButtons();
           hideError();
@@ -787,6 +817,30 @@
           }
         });
       });
+
+      // Custom time apply button
+      elements.customTimeApply.onclick = () => {
+        const startVal = elements.customStartTime.value;
+        const endVal = elements.customEndTime.value;
+        if (!startVal || !endVal) return;
+        const startTs = Math.floor(new Date(startVal).getTime() / 1000);
+        const endTs = Math.floor(new Date(endVal).getTime() / 1000);
+        if (endTs <= startTs) return;
+        // Store exact timestamps for API calls that support it
+        state.customStart = startTs;
+        state.customEnd = endTs;
+        // Convert to hours from start to now for APIs that only support hours
+        const nowTs = Math.floor(Date.now() / 1000);
+        const hoursFromNow = Math.ceil((nowTs - startTs) / 3600);
+        state.hours = String(hoursFromNow);
+        state.expandedModelName = null;
+        hideError();
+        if (state.detailData && elements.keySearchInput.value.trim()) {
+          void loadDetailBySearch(elements.keySearchInput.value);
+        } else {
+          void loadDashboard();
+        }
+      };
     }
 
     function renderTrendModelOptions(models) {
@@ -1328,7 +1382,46 @@
       }
     }
 
+    const TOP_MODEL_COLUMNS = [
+      { label: '模型', field: null },
+      { label: '请求数', field: 'count' },
+      { label: '成功率', field: 'successRate' },
+      { label: '平均耗时', field: 'avgTime' },
+      { label: '总 Tokens', field: 'totalTokens' },
+      { label: '总 Quota', field: 'totalQuota' },
+    ];
+
+    function renderTopModelsHead() {
+      const headRow = document.getElementById('topModelsTableHead');
+      if (!headRow) return;
+      headRow.innerHTML = TOP_MODEL_COLUMNS.map(col => {
+        if (!col.field) return `<th class="px-4 py-2">${col.label}</th>`;
+        const isActive = state.topModelsSortField === col.field;
+        const arrow = isActive
+          ? (state.topModelsSortOrder === 'desc' ? '↓' : '↑')
+          : '↕';
+        const activeClass = isActive ? 'text-primary-600 dark:text-primary-400' : '';
+        return `<th class="px-4 py-2 cursor-pointer select-none hover:text-slate-700 dark:hover:text-slate-200 transition-colors ${activeClass}" data-sort-field="${col.field}">
+          ${col.label} <span class="ml-0.5 text-[10px] opacity-60">${arrow}</span>
+        </th>`;
+      }).join('');
+      headRow.querySelectorAll('[data-sort-field]').forEach(th => {
+        th.addEventListener('click', () => {
+          const field = th.getAttribute('data-sort-field');
+          if (state.topModelsSortField === field) {
+            state.topModelsSortOrder = state.topModelsSortOrder === 'desc' ? 'asc' : 'desc';
+          } else {
+            state.topModelsSortField = field;
+            state.topModelsSortOrder = 'desc';
+          }
+          if (state.data?.top_models) renderTopModels(state.data.top_models);
+        });
+      });
+    }
+
     function renderTopModels(topModels) {
+      renderTopModelsHead();
+
       if (!topModels.length) {
         elements.topModelsTable.innerHTML = '<tr><td colspan="6" class="px-4 py-8 text-center text-sm text-slate-500 dark:text-slate-400">暂无模型排行数据</td></tr>';
         if (topModelsChartInstance) {
@@ -1337,7 +1430,17 @@
         return;
       }
 
-      elements.topModelsTable.innerHTML = topModels.map((model) => {
+      // Sort data
+      let sorted = [...topModels];
+      if (state.topModelsSortField) {
+        sorted.sort((a, b) => {
+          const av = a[state.topModelsSortField] ?? 0;
+          const bv = b[state.topModelsSortField] ?? 0;
+          return state.topModelsSortOrder === 'desc' ? bv - av : av - bv;
+        });
+      }
+
+      elements.topModelsTable.innerHTML = sorted.map((model) => {
         const isSelected = state.trendMode === 'model' && state.trendModelName === model.name;
         const isExpanded = state.expandedModelName === model.name;
         return `
@@ -1392,7 +1495,7 @@
         button.addEventListener('click', () => {
           const modelName = button.getAttribute('data-model-row');
           state.expandedModelName = state.expandedModelName === modelName ? null : modelName;
-          renderTopModels(topModels);
+          renderTopModels(state.data?.top_models || topModels);
           lucide.createIcons();
         });
       });
@@ -1592,9 +1695,10 @@
 
     function renderKeyInfo(data) {
       state.detailData = data;
-      state.detailMode = 'key';
+      const isUserMode = data.token && data.token.tokenId === 0;
+      state.detailMode = isUserMode ? 'user' : 'key';
       state.detailExpandedModelName = null;
-      setDetailSectionCopy('key');
+      setDetailSectionCopy(isUserMode ? 'user' : 'key');
       const token = data.token;
       const user = data.user;
       const usage = data.usage_summary;
@@ -1903,14 +2007,62 @@
       });
     }
 
+    const KEY_MODEL_COLUMNS = [
+      { label: '模型', field: null },
+      { label: '请求数', field: 'count' },
+      { label: '成功率', field: 'successRate' },
+      { label: '平均耗时', field: 'avgTime' },
+      { label: '总 Tokens', field: 'totalTokens' },
+      { label: '消耗额度', field: 'totalQuota' },
+    ];
+
+    function renderKeyModelsHead() {
+      const headRow = elements.keyModelsTableHead;
+      if (!headRow) return;
+      headRow.innerHTML = KEY_MODEL_COLUMNS.map(col => {
+        if (!col.field) return `<th class="px-4 py-2">${col.label}</th>`;
+        const isActive = state.detailModelsSortField === col.field;
+        const arrow = isActive
+          ? (state.detailModelsSortOrder === 'desc' ? '↓' : '↑')
+          : '↕';
+        const activeClass = isActive ? 'text-primary-600 dark:text-primary-400' : '';
+        return `<th class="px-4 py-2 cursor-pointer select-none hover:text-slate-700 dark:hover:text-slate-200 transition-colors ${activeClass}" data-detail-sort-field="${col.field}">
+          ${col.label} <span class="ml-0.5 text-[10px] opacity-60">${arrow}</span>
+        </th>`;
+      }).join('');
+      headRow.querySelectorAll('[data-detail-sort-field]').forEach(th => {
+        th.addEventListener('click', () => {
+          const field = th.getAttribute('data-detail-sort-field');
+          if (state.detailModelsSortField === field) {
+            state.detailModelsSortOrder = state.detailModelsSortOrder === 'desc' ? 'asc' : 'desc';
+          } else {
+            state.detailModelsSortField = field;
+            state.detailModelsSortOrder = 'desc';
+          }
+          if (state.detailData?.top_models) renderKeyModelsTable(state.detailData.top_models);
+        });
+      });
+    }
+
     function renderKeyModelsTable(topModels) {
+      renderKeyModelsHead();
       if (!topModels.length) {
         elements.keyModelsTable.innerHTML = '<tr><td colspan="6" class="px-4 py-8 text-center text-sm text-slate-500 dark:text-slate-400">暂无模型数据</td></tr>';
         return;
       }
 
+      // Sort data
+      let sorted = [...topModels];
+      if (state.detailModelsSortField) {
+        sorted.sort((a, b) => {
+          const av = a[state.detailModelsSortField] ?? 0;
+          const bv = b[state.detailModelsSortField] ?? 0;
+          return state.detailModelsSortOrder === 'desc' ? bv - av : av - bv;
+        });
+      }
+
       const isChannelMode = state.detailMode === 'channel';
-      elements.keyModelsTable.innerHTML = topModels.map((model) => {
+      elements.keyModelsTable.innerHTML = sorted.map((model) => {
         const isExpanded = state.detailExpandedModelName === model.name;
         return `
           <tr class="rounded-2xl bg-white/70 text-sm text-slate-700 dark:bg-slate-900/70 dark:text-slate-200">
@@ -1964,7 +2116,7 @@
         button.addEventListener('click', () => {
           const modelName = button.getAttribute('data-detail-model-row');
           state.detailExpandedModelName = state.detailExpandedModelName === modelName ? null : modelName;
-          renderKeyModelsTable(topModels);
+          renderKeyModelsTable(state.detailData?.top_models || topModels);
           lucide.createIcons();
         });
       });
@@ -2044,6 +2196,44 @@
       }
     }
 
+    // Search by username
+    async function loadUserQuota(username, verificationData = null) {
+      if (!username || !username.trim()) {
+        clearDetailInfo();
+        return;
+      }
+
+      setLoading(true);
+      try {
+        const response = await fetch(buildApiUrl('/api/user/quota', {
+          username: username.trim(),
+          hours: state.hours,
+          ...(state.customStart && state.customEnd ? { start: state.customStart, end: state.customEnd } : {}),
+          ...(verificationData ? verificationData : {}),
+        }, {
+          searchTarget: buildSearchTarget('user', username.trim()),
+        }), {
+          headers: { ...getAuthHeaders() },
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (isSearchVerificationError(payload, response)) {
+          clearSearchAccess({ revoke: true });
+        }
+        if (!response.ok) {
+          throw new Error(payload.message || `用户查询失败 (${response.status})`);
+        }
+
+        rememberSearchAccessToken(payload, buildSearchTarget('user', username.trim()));
+        renderKeyInfo(payload.data);
+      } catch (error) {
+        showError(error instanceof Error ? error.message : '用户查询失败');
+        clearDetailInfo();
+      } finally {
+        setLoading(false);
+        lucide.createIcons();
+      }
+    }
+
     async function loadDetailBySearch(rawValue, verificationData = null) {
       const parsed = parseDetailSearchQuery(rawValue);
       if (!parsed) {
@@ -2053,6 +2243,11 @@
 
       if (parsed.mode === 'channel') {
         await loadChannelRecords(parsed.value, verificationData);
+        return;
+      }
+
+      if (parsed.mode === 'user') {
+        await loadUserQuota(parsed.value, verificationData);
         return;
       }
 
