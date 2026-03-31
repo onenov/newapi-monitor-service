@@ -292,7 +292,7 @@
           <div class="overflow-x-auto">
             <table class="min-w-full border-separate border-spacing-y-3">
               <thead>
-                <tr class="text-left text-xs font-extrabold tracking-[0.12em] text-slate-500 dark:text-slate-400">
+                <tr id="keyModelsTableHead" class="text-left text-xs font-extrabold tracking-[0.12em] text-slate-500 dark:text-slate-400">
                   <th class="px-4 py-2">模型</th>
                   <th class="px-4 py-2">请求数</th>
                   <th class="px-4 py-2">成功率</th>
@@ -495,6 +495,8 @@
       topModelsView: 'table',
       topModelsSortField: 'totalQuota',
       topModelsSortOrder: 'desc',
+      detailModelsSortField: 'totalQuota',
+      detailModelsSortOrder: 'desc',
       expandedModelName: null,
       trendMode: 'all',
       trendModelName: '__all__',
@@ -528,6 +530,7 @@
       detailTrendEyebrow: document.getElementById('detailTrendEyebrow'),
       detailTrendTitle: document.getElementById('detailTrendTitle'),
       detailModelsEyebrow: document.getElementById('detailModelsEyebrow'),
+      keyModelsTableHead: document.getElementById('keyModelsTableHead'),
       detailModelsTitle: document.getElementById('detailModelsTitle'),
       hoursButtonGroup: document.getElementById('hoursButtonGroup'),
       customTimeRange: document.getElementById('customTimeRange'),
@@ -2004,14 +2007,62 @@
       });
     }
 
+    const KEY_MODEL_COLUMNS = [
+      { label: '模型', field: null },
+      { label: '请求数', field: 'count' },
+      { label: '成功率', field: 'successRate' },
+      { label: '平均耗时', field: 'avgTime' },
+      { label: '总 Tokens', field: 'totalTokens' },
+      { label: '消耗额度', field: 'totalQuota' },
+    ];
+
+    function renderKeyModelsHead() {
+      const headRow = elements.keyModelsTableHead;
+      if (!headRow) return;
+      headRow.innerHTML = KEY_MODEL_COLUMNS.map(col => {
+        if (!col.field) return `<th class="px-4 py-2">${col.label}</th>`;
+        const isActive = state.detailModelsSortField === col.field;
+        const arrow = isActive
+          ? (state.detailModelsSortOrder === 'desc' ? '↓' : '↑')
+          : '↕';
+        const activeClass = isActive ? 'text-primary-600 dark:text-primary-400' : '';
+        return `<th class="px-4 py-2 cursor-pointer select-none hover:text-slate-700 dark:hover:text-slate-200 transition-colors ${activeClass}" data-detail-sort-field="${col.field}">
+          ${col.label} <span class="ml-0.5 text-[10px] opacity-60">${arrow}</span>
+        </th>`;
+      }).join('');
+      headRow.querySelectorAll('[data-detail-sort-field]').forEach(th => {
+        th.addEventListener('click', () => {
+          const field = th.getAttribute('data-detail-sort-field');
+          if (state.detailModelsSortField === field) {
+            state.detailModelsSortOrder = state.detailModelsSortOrder === 'desc' ? 'asc' : 'desc';
+          } else {
+            state.detailModelsSortField = field;
+            state.detailModelsSortOrder = 'desc';
+          }
+          if (state.detailData?.top_models) renderKeyModelsTable(state.detailData.top_models);
+        });
+      });
+    }
+
     function renderKeyModelsTable(topModels) {
+      renderKeyModelsHead();
       if (!topModels.length) {
         elements.keyModelsTable.innerHTML = '<tr><td colspan="6" class="px-4 py-8 text-center text-sm text-slate-500 dark:text-slate-400">暂无模型数据</td></tr>';
         return;
       }
 
+      // Sort data
+      let sorted = [...topModels];
+      if (state.detailModelsSortField) {
+        sorted.sort((a, b) => {
+          const av = a[state.detailModelsSortField] ?? 0;
+          const bv = b[state.detailModelsSortField] ?? 0;
+          return state.detailModelsSortOrder === 'desc' ? bv - av : av - bv;
+        });
+      }
+
       const isChannelMode = state.detailMode === 'channel';
-      elements.keyModelsTable.innerHTML = topModels.map((model) => {
+      elements.keyModelsTable.innerHTML = sorted.map((model) => {
         const isExpanded = state.detailExpandedModelName === model.name;
         return `
           <tr class="rounded-2xl bg-white/70 text-sm text-slate-700 dark:bg-slate-900/70 dark:text-slate-200">
@@ -2065,7 +2116,7 @@
         button.addEventListener('click', () => {
           const modelName = button.getAttribute('data-detail-model-row');
           state.detailExpandedModelName = state.detailExpandedModelName === modelName ? null : modelName;
-          renderKeyModelsTable(topModels);
+          renderKeyModelsTable(state.detailData?.top_models || topModels);
           lucide.createIcons();
         });
       });
