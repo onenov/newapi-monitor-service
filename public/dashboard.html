@@ -389,7 +389,7 @@
           <div id="topModelsTableView" class="overflow-x-auto">
             <table class="min-w-full border-separate border-spacing-y-3">
               <thead>
-                <tr class="text-left text-xs font-extrabold tracking-[0.12em] text-slate-500 dark:text-slate-400">
+                <tr id="topModelsTableHead" class="text-left text-xs font-extrabold tracking-[0.12em] text-slate-500 dark:text-slate-400">
                   <th class="px-4 py-2">模型</th>
                   <th class="px-4 py-2">请求数</th>
                   <th class="px-4 py-2">成功率</th>
@@ -493,6 +493,8 @@
       detailMode: null,
       detailExpandedModelName: null,
       topModelsView: 'table',
+      topModelsSortField: 'totalQuota',
+      topModelsSortOrder: 'desc',
       expandedModelName: null,
       trendMode: 'all',
       trendModelName: '__all__',
@@ -1377,7 +1379,46 @@
       }
     }
 
+    const TOP_MODEL_COLUMNS = [
+      { label: '模型', field: null },
+      { label: '请求数', field: 'count' },
+      { label: '成功率', field: 'successRate' },
+      { label: '平均耗时', field: 'avgTime' },
+      { label: '总 Tokens', field: 'totalTokens' },
+      { label: '总 Quota', field: 'totalQuota' },
+    ];
+
+    function renderTopModelsHead() {
+      const headRow = document.getElementById('topModelsTableHead');
+      if (!headRow) return;
+      headRow.innerHTML = TOP_MODEL_COLUMNS.map(col => {
+        if (!col.field) return `<th class="px-4 py-2">${col.label}</th>`;
+        const isActive = state.topModelsSortField === col.field;
+        const arrow = isActive
+          ? (state.topModelsSortOrder === 'desc' ? '↓' : '↑')
+          : '↕';
+        const activeClass = isActive ? 'text-primary-600 dark:text-primary-400' : '';
+        return `<th class="px-4 py-2 cursor-pointer select-none hover:text-slate-700 dark:hover:text-slate-200 transition-colors ${activeClass}" data-sort-field="${col.field}">
+          ${col.label} <span class="ml-0.5 text-[10px] opacity-60">${arrow}</span>
+        </th>`;
+      }).join('');
+      headRow.querySelectorAll('[data-sort-field]').forEach(th => {
+        th.addEventListener('click', () => {
+          const field = th.getAttribute('data-sort-field');
+          if (state.topModelsSortField === field) {
+            state.topModelsSortOrder = state.topModelsSortOrder === 'desc' ? 'asc' : 'desc';
+          } else {
+            state.topModelsSortField = field;
+            state.topModelsSortOrder = 'desc';
+          }
+          if (state.data?.top_models) renderTopModels(state.data.top_models);
+        });
+      });
+    }
+
     function renderTopModels(topModels) {
+      renderTopModelsHead();
+
       if (!topModels.length) {
         elements.topModelsTable.innerHTML = '<tr><td colspan="6" class="px-4 py-8 text-center text-sm text-slate-500 dark:text-slate-400">暂无模型排行数据</td></tr>';
         if (topModelsChartInstance) {
@@ -1386,7 +1427,17 @@
         return;
       }
 
-      elements.topModelsTable.innerHTML = topModels.map((model) => {
+      // Sort data
+      let sorted = [...topModels];
+      if (state.topModelsSortField) {
+        sorted.sort((a, b) => {
+          const av = a[state.topModelsSortField] ?? 0;
+          const bv = b[state.topModelsSortField] ?? 0;
+          return state.topModelsSortOrder === 'desc' ? bv - av : av - bv;
+        });
+      }
+
+      elements.topModelsTable.innerHTML = sorted.map((model) => {
         const isSelected = state.trendMode === 'model' && state.trendModelName === model.name;
         const isExpanded = state.expandedModelName === model.name;
         return `
@@ -1441,7 +1492,7 @@
         button.addEventListener('click', () => {
           const modelName = button.getAttribute('data-model-row');
           state.expandedModelName = state.expandedModelName === modelName ? null : modelName;
-          renderTopModels(topModels);
+          renderTopModels(state.data?.top_models || topModels);
           lucide.createIcons();
         });
       });
